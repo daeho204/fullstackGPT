@@ -22,3 +22,5 @@ doc = loader.load()
 splitted = loader.load_and_split(text_splitter=splitter)
 print(splitted)
 print(len(splitted))
+
+
