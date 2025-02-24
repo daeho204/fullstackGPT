@@ -12,30 +12,39 @@ from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain.storage import LocalFileStore
+from langchain.embeddings.cache import CacheBackedEmbeddings
 
 load_dotenv()
 
 loader = WebBaseLoader("https://lilianweng.github.io/posts/2023-06-23-agent/")
 data = loader.load()
 
-# Split
+# Text Split
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
 all_splits = text_splitter.split_documents(data)
 
-# Store splits
-vectorstore = FAISS.from_documents(documents=all_splits, embedding=OpenAIEmbeddings())
+# Cache
+cache_dir = LocalFileStore(".cache/embeddings/")
+embeddings = OpenAIEmbeddings()
+cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
+
+# Embedding -> Store(retriever)
+vectorstore = FAISS.from_documents(
+    documents=all_splits, 
+    embedding=cached_embeddings
+)
 
 # LLM
 llm = ChatOpenAI()
 prompt = hub.pull("rlm/rag-prompt")
+
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
-
-
 qa_chain = (
     {
-        "context": vectorstore.as_retriever() | format_docs,
+        "context": vectorstore.as_retriever() | RunnableLambda(format_docs),
         "question": RunnablePassthrough(),
     }
     | prompt
