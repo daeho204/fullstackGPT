@@ -10,30 +10,8 @@ from langchain_community.vectorstores import FAISS
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.callbacks.base import BaseCallbackHandler
-
+import os
 load_dotenv()
-
-st.set_page_config(page_title="DocumentGPT", page_icon="📃")
-
-# if "messages" not in st.session_state:
-#     st.session_state["messages"] = []
-
-st.title("DocumentGPT")
-
-st.markdown(
-    """
-    Welcome!
-    
-    Use this chatbot to ask questions to an AI about your files!
-    
-    Upload your files on the side bar
-    """
-)
-with st.sidebar:
-    file = st.file_uploader(
-        "Upload a .txt .pdf or .docx file",
-        type=["pdf", "txt", "docx"],
-    )
 
 class ChatCallbackHandler(BaseCallbackHandler):
 
@@ -50,7 +28,7 @@ class ChatCallbackHandler(BaseCallbackHandler):
         self.message_box.markdown(self.message)
 
 llm = ChatOpenAI(
-    temperature=0.1,
+    temperature=0.5,
     streaming=True,
     callbacks=[ChatCallbackHandler()]
 )
@@ -72,16 +50,21 @@ prompt = ChatPromptTemplate.from_messages(
 )
 
 
-# file check decorator in streamlit
-@st.cache_resource(show_spinner="Embedding File ...")
 
 def embedded_file(file):
     file_content = file.read()
     file_path = f"./.cache/files/{file.name}"
     with open(file_path, "wb") as f:
         f.write(file_content)
+    embedding_cache_dir = f"./.cache/embeddings/{file.name}"
+    faiss_index_file = os.path.join(embedding_cache_dir, "index.faiss")
+    faiss_store_file = os.path.join(embedding_cache_dir, "index.pkl")
 
-    cache_dir = LocalFileStore(f"./.cache/embeddings/{file.name}")
+    if os.path.exists(faiss_index_file) and os.path.exists(faiss_store_file):
+        vectorstore = FAISS.load_local(embedding_cache_dir, OpenAIEmbeddings())
+        return vectorstore.as_retriever()
+
+    cache_dir = LocalFileStore(embedding_cache_dir)
     splitter = CharacterTextSplitter.from_tiktoken_encoder(
         separator="\n",
         chunk_size=600,
@@ -93,47 +76,30 @@ def embedded_file(file):
     embeddings = OpenAIEmbeddings()
     cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
     vectorstore = FAISS.from_documents(docs, cached_embeddings)
-    retriever = vectorstore.as_retriever()
-    return retriever
+
+    vectorstore.save_local(embedding_cache_dir)
+
+    return vectorstore.as_retriever()
 
 
 def format_docs(docs):
     return "\n\n".join(document.page_content for document in docs)
 
-def save_message(message, role):
-    st.session_state["messages"].append({"message": message, "role": role})
-    
-def send_message(message, role, save=True):
-    with st.chat_message(role):
-        st.markdown(message)
-    if save:
-        save_message(message, role)
 
 
-def paint_history():
-    for message in st.session_state["messages"]:
-        send_message(message["message"], message["role"], save=False)
+file = "fullstackGPT/files/F.C.M 교량공사 안전보건작업 지침.pdf"
+with open(file, "rb") as f:
+    retriever = embedded_file(f)
+print("______", retriever)
+chain = (
+    {
+        "context": retriever | RunnableLambda(format_docs),
+        "question": RunnablePassthrough(),
+    }
+    | prompt
+    | llm
+)
 
-
-if file:
-    retriever = embedded_file(file)
-    print("______", retriever)
-    send_message("I'm ready! Ask me something", "ai", save=False)
-    paint_history()
-    message = st.chat_input("Ask anything about your file...")
-    if message:
-        send_message(message, "human")
-        chain = (
-            {
-                "context": retriever | RunnableLambda(format_docs),
-                "question": RunnablePassthrough(),
-            }
-            | prompt
-            | llm
-        )
-        with st.chat_message("ai"):
-            response = chain.invoke(message)
+response = chain.invoke("FCM공법에 대해 설명해봐")
        
-
-else:
-    st.session_state["messages"] = []
+print(response)
