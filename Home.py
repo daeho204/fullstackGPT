@@ -9,8 +9,8 @@ st.markdown(
     """
     # List of GPTs
     
-    - [ ] [DocumentGPT](/DocumentGPT)
-    - [ ] [PrivateGPT](/PrivateGPT)
+    - [ ] [OpenAIEmbedding](/OpenAIEmbedding)
+    - [ ] [jhgan/ko-sbert-sts](/jhgan/ko-sbert-sts)
     - [ ] [QuizGPT](/QuizGPT)
     - [ ] [SiteGPT](/SiteGPT)
     - [ ] [MeetingGPT](/MeetingGPT)

@@ -10,7 +10,8 @@ from langchain_community.vectorstores import FAISS
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.callbacks.base import BaseCallbackHandler
-
+from langchain_huggingface import HuggingFaceEmbeddings
+import os
 load_dotenv()
 
 st.set_page_config(page_title="PrivateGPT", page_icon="📃")
@@ -50,7 +51,7 @@ class ChatCallbackHandler(BaseCallbackHandler):
         self.message_box.markdown(self.message)
 
 llm = ChatOpenAI(
-    temperature=0.1,
+    temperature=0.5,
     streaming=True,
     callbacks=[ChatCallbackHandler()]
 )
@@ -60,7 +61,7 @@ prompt = ChatPromptTemplate.from_messages(
         (
             "system",
             """
-     Answer your questions using Only the following context.
+     Answer your questions using the following context.
      If you don't know the answer, just say you don't know. DO NOT make anything up.
      
      Context: {context}
@@ -79,7 +80,9 @@ def embedded_file(file):
     with open(file_path, "wb") as f:
         f.write(file_content)
 
-    cache_dir = LocalFileStore(f"./.cache/private_embeddings/{file.name}")
+    model_name = "jhgan/ko-sbert-sts"
+    
+    cache_dir = LocalFileStore(f"./.cache/{model_name}_embeddings/{file.name}")
     splitter = CharacterTextSplitter.from_tiktoken_encoder(
         separator="\n",
         chunk_size=600,
@@ -88,7 +91,7 @@ def embedded_file(file):
     loader = UnstructuredLoader(file_path)
     docs = loader.load_and_split(text_splitter=splitter)
 
-    embeddings = OpenAIEmbeddings()
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
     cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
     vectorstore = FAISS.from_documents(docs, cached_embeddings)
     retriever = vectorstore.as_retriever()
@@ -121,6 +124,14 @@ if file:
     message = st.chat_input("Ask anything about your file...")
     if message:
         send_message(message, "human")
+        # ✅ context 디버깅용
+        relevant_docs = retriever.get_relevant_documents(message)
+        context_str = format_docs(relevant_docs)
+
+        with st.expander("🔍 디버깅: LLM에게 전달된 context 보기"):
+            st.markdown(context_str[:3000] + ("..." if len(context_str) > 3000 else ""))
+
+        print("🔍 [DEBUG] Context 전달 내용:\n", context_str[:1000])  # 콘솔 출력도 같이
         chain = (
             {
                 "context": retriever | RunnableLambda(format_docs),
@@ -131,7 +142,8 @@ if file:
         )
         with st.chat_message("ai"):
             response = chain.invoke(message)
-       
+        
 
 else:
     st.session_state["messages"] = []
+

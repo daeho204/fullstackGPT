@@ -11,26 +11,15 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.callbacks.base import BaseCallbackHandler
 import os
+from sentence_transformers import SentenceTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
+
 load_dotenv()
 
-class ChatCallbackHandler(BaseCallbackHandler):
-
-    message = ""
-
-    def on_llm_start(self, *args, **kwargs):
-        self.message_box = st.empty()
-        
-    def on_llm_end(self, *args, **kwargs):
-        save_message(self.message, "ai")
-        
-    def on_llm_new_token(self, token, *args, **kwargs):
-        self.message += token
-        self.message_box.markdown(self.message)
 
 llm = ChatOpenAI(
     temperature=0.5,
     streaming=True,
-    callbacks=[ChatCallbackHandler()]
 )
 
 prompt = ChatPromptTemplate.from_messages(
@@ -38,9 +27,8 @@ prompt = ChatPromptTemplate.from_messages(
         (
             "system",
             """
-     Answer your questions using Only the following context.
+     Answer your questions using the following context.
      If you don't know the answer, just say you don't know. DO NOT make anything up.
-     Your response should always be in Korean.
      
      Context: {context}
      """,
@@ -53,16 +41,20 @@ prompt = ChatPromptTemplate.from_messages(
 
 def embedded_file(file):
     file_content = file.read()
-    file_path = f"./.cache/files/{file.name}"
+    file_name = os.path.basename(file.name)
+    print("file_name : ", file_name)
+    file_path = f"./.cache/files/{file_name}"
     with open(file_path, "wb") as f:
         f.write(file_content)
-    embedding_cache_dir = f"./.cache/embeddings/{file.name}"
-    faiss_index_file = os.path.join(embedding_cache_dir, "index.faiss")
-    faiss_store_file = os.path.join(embedding_cache_dir, "index.pkl")
+    model_name = "jhgan/ko-sbert-sts"
+    embedding_name = model_name.split("/")[-1]  # "ko-sbert-sts"
+    embedding_cache_dir = f"./.cache/embeddings/{file_name}_{embedding_name}"
+    # faiss_index_file = os.path.join(embedding_cache_dir, "index.faiss")
+    # faiss_store_file = os.path.join(embedding_cache_dir, "index.pkl")
 
-    if os.path.exists(faiss_index_file) and os.path.exists(faiss_store_file):
-        vectorstore = FAISS.load_local(embedding_cache_dir, OpenAIEmbeddings())
-        return vectorstore.as_retriever()
+    # if os.path.exists(faiss_index_file) and os.path.exists(faiss_store_file):
+    #     vectorstore = FAISS.load_local(embedding_cache_dir, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
+    #     return vectorstore.as_retriever()
 
     cache_dir = LocalFileStore(embedding_cache_dir)
     splitter = CharacterTextSplitter.from_tiktoken_encoder(
@@ -73,11 +65,15 @@ def embedded_file(file):
     loader = UnstructuredLoader(file_path)
     docs = loader.load_and_split(text_splitter=splitter)
 
-    embeddings = OpenAIEmbeddings()
+    # embeddings = OpenAIEmbeddings()
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
     cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
     vectorstore = FAISS.from_documents(docs, cached_embeddings)
+    
+
 
     vectorstore.save_local(embedding_cache_dir)
+    
 
     return vectorstore.as_retriever()
 
@@ -87,7 +83,7 @@ def format_docs(docs):
 
 
 
-file = "fullstackGPT/files/F.C.M 교량공사 안전보건작업 지침.pdf"
+file = ".cache/files/test.pdf"
 with open(file, "rb") as f:
     retriever = embedded_file(f)
 print("______", retriever)
@@ -99,7 +95,17 @@ chain = (
     | prompt
     | llm
 )
+# question = "can you explain what fcm(free cantilever method) is in korean?"
+question = "F.C.M(free cantilever method) 에 대해 설명해줘"
+# retriever에서 질문과 관련된 문서 가져오기
+relevant_docs = retriever.get_relevant_documents(question)
 
-response = chain.invoke("FCM공법에 대해 설명해봐")
-       
-print(response)
+# 가져온 문서의 내용을 출력
+for i, doc in enumerate(relevant_docs):
+    print(f"Document {i+1}:\n{doc.page_content}\n")
+response = chain.invoke(question)
+
+print("답변 : ",response)
+
+
+
